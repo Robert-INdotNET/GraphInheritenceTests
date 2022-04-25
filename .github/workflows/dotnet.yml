@@ -22,11 +22,11 @@ jobs:
     - name: Build
       run: dotnet build --no-restore
     - name: Test
-      run: dotnet test --no-build --verbosity normal      
-    - name: Test Report
-      uses: zyborg/dotnet-tests-report@v1
+      run: dotnet test --logger trx --results-directory "TestResults-${{ matrix.dotnet-version }}"
+    - name: Upload dotnet test results
+      uses: actions/upload-artifact@v3
       with:
-        project_path: GraphInheritenceTests
-        report_name: tests
-        report_title: Tests
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+        name: dotnet-results-${{ matrix.dotnet-version }}
+        path: TestResults-${{ matrix.dotnet-version }}
+      # Use always() to always run this step to publish test results when there are test failures
+      if: ${{ always() }}
