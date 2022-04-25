@@ -76,32 +76,31 @@ namespace GraphInheritenceTests
         }
 
         [Test]
-        public void _1_DoSimpleChangeOnAggregationCustomerKind_WorksAsExpected()
+        public void _1_DoSimpleChangeOnAggregationCustomerKind()
         {
-            DoSimpleChangeOnAggregationCustomerKind(_superCustomer); // works :-)
+            DoSimpleChangeOnAggregationCustomerKind(_superCustomer);
         }
 
         [Test]
-        public void _2_AChangeOnAggregationCountryShouldBeIgnored_WorksAsExpected()
+        public void _2_AChangeOnAggregationCountryShouldBeIgnored()
         {
-            AChangeOnAggregationCountryShouldBeIgnored(_superCustomer); // works :-)
+            AChangeOnAggregationCountryShouldBeIgnored(_superCustomer);
         }
 
         [Test]
-        public void _3_RemoveChangeAndAddEntriesInTagListComposition_DoesntCustomerGetsLost()
+        public void _3_RemoveChangeAndAddEntriesInTagListComposition()
         {
             RemoveChangeAndAddEntriesInTagListComposition(_superCustomer, _tag2.Id);
         }
 
         [Test]
-        [Ignore("doesn't work as expected - comment in model property OrganizationId to see it")]
-        public void _4_DoChangeOnCompositionOrganizationNotesWithBackReferenceOrganizationId_CommentInModelPropertyOrganizationId()
+        public void _4_DoChangeOnCompositionOrganizationNotesWithBackReferenceOrganizationId()
         {
             DoChangeOnCompositionOrganizationNotesWithBackReferenceOrganization(_superCustomer);
         }
 
         [Test]
-        public void _5_DoChangeOnParentChildrenTreeOrHierarchy_DoesntWork_ParentGetsLost()
+        public void _5_DoChangeOnParentChildrenTreeOrHierarchy()
         {
             DoChangeOnParentChildrenTreeOrHierarchy(); //doesn't work - parent gets lost (removed)
         }
@@ -146,7 +145,14 @@ namespace GraphInheritenceTests
             using (var dbContext = new ComplexDbContext())
             {
                 //dbContext.Update(superCustomer); // doesn't support change tracking with removed items as we know
-                dbContext.Map<Customer>(superCustomer);
+
+                // Leonardo Porro suggests to use an anonymous type 
+                dbContext.Map<OrganizationBase>(new
+                {
+                    superCustomer.Id,
+                    superCustomer.OrganizationType,
+                    superCustomer.Tags
+                });
                 dbContext.SaveChanges();
             }
             using (var dbContext = new ComplexDbContext())
@@ -174,7 +180,11 @@ namespace GraphInheritenceTests
 
             using (var dbContext = new ComplexDbContext())
             {
-                var mapped = dbContext.Map<Customer>(superCustomer);
+                // if you use Map<Customer>(superCustomer):
+                // Detached.Mappers.Exceptions.MapperException : Customer is not a valid value for discriminator in entity GraphInheritenceTests.ComplexModels.Customer.
+
+                // so use base type - OrganizationBase (whether it's not logical correct)
+                var mapped = dbContext.Map<OrganizationBase>(superCustomer);
 
                 dbContext.SaveChanges();
             }
@@ -187,7 +197,7 @@ namespace GraphInheritenceTests
                     .Include(c => c.Tags)
                     .Include(c => c.CustomerKind)
                     .First();
-                Assert.That(loadedCustomer.CustomerName, Is.EqualTo("Super Customer - Changed to incomplete private"));
+                Assert.That(loadedCustomer.CustomerName, Is.EqualTo("Super Customer - Changed to incomplete private"), "No change would be saved. Maybe it's because it exists only in the concrete type.");
                 Assert.That(loadedCustomer.CustomerKind.Id, Is.EqualTo(CustomerKindId.Private));
                 Assert.That(loadedCustomer.CustomerKind.Name, Is.EqualTo("Private Customer"));
                 Assert.That(loadedCustomer.PrimaryAddress.City, Is.EqualTo("Ingolstadt"));
@@ -200,20 +210,32 @@ namespace GraphInheritenceTests
 
         private static void DoChangeOnCompositionOrganizationNotesWithBackReferenceOrganization(Customer superCustomer)
         {
-            // Back-references don't work - OrganizationId - comment out from model to see, that other Properties are OK :-(
+            // Back-references don't work - OrganizationId should be included in DTO's
             superCustomer.Notes.Add(new OrganizationNotes()
             {
                 Date = DateTime.Today,
                 Text = "Note...",
-                //OrganizationId = superCustomer.Id // doesn't work
+                //OrganizationId = superCustomer.Id // is allowed in entity, but mustn't be set from Frontend
             });
 
             using (var dbContext = new ComplexDbContext())
             {
-                var mapped = dbContext.Map<Customer>(superCustomer);
+                var mapped = dbContext.Map<OrganizationBase>(superCustomer);
 
                 dbContext.SaveChanges();
-                // Exception with OrganizationId :-(
+            }
+
+            using (var dbContext = new ComplexDbContext())
+            {
+                var superCustomerLoaded = dbContext.Customers
+                    .Include(c => c.Notes)
+                    .Single(c => c.Id == superCustomer.Id);
+
+                Assert.That(superCustomerLoaded.Notes, Has.Count.EqualTo(1));
+                Assert.That(superCustomerLoaded.Notes[0].Date, Is.EqualTo(DateTime.Today));
+                Assert.That(superCustomerLoaded.Notes[0].Text, Is.EqualTo("Note..."));
+                Assert.That(superCustomerLoaded.Notes[0].OrganizationId, Is.EqualTo(superCustomer.Id));
+                Assert.That(superCustomerLoaded.Notes[0].Organization.Id, Is.EqualTo(superCustomer.Id));
             }
         }
 
@@ -243,8 +265,24 @@ namespace GraphInheritenceTests
                 //dbContext.Update(parent); // works - expected
                 //dbContext.Update(child); // works - expected
 
-                var mapped1 = dbContext.Map<Customer>(parent);  // doesn't work - parent gets lost (removed) :-(
-                var mapped2 = dbContext.Map<Customer>(child);  // doesn't work :-(
+                // if the whole entities are used - parent gets lost (removed)
+                // so the workaround with anonymous type is working
+                var mapped1 = dbContext.Map<OrganizationBase>(new
+                {
+                    parent.Id,
+                    parent.OrganizationType,
+                    parent.ParentId,
+                    parent.Parent,
+                    parent.Children
+                });  
+                var mapped2 = dbContext.Map<OrganizationBase>(new
+                {
+                    child.Id,
+                    child.OrganizationType,
+                    child.ParentId,
+                    child.Parent,
+                    child.Children
+                });
 
                 dbContext.SaveChanges();
             }
@@ -273,7 +311,16 @@ namespace GraphInheritenceTests
 
             using (var dbContext = new ComplexDbContext())
             {
-                var mapped = dbContext.Map<Customer>(superCustomer);
+                // preferred suggested way
+                var mapped = dbContext.Map<OrganizationBase>(new
+                {
+                    superCustomer.Id,
+                    superCustomer.OrganizationType,
+                    superCustomer.PrimaryAddress
+                });
+
+                // works, too
+                // var mapped = dbContext.Map<OrganizationBase>(superCustomer);
 
                 dbContext.SaveChanges();
             }

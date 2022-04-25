@@ -30,7 +30,11 @@ namespace GraphInheritenceTests
                 {
                     // not what we want, because OrganizationBase can be Customer or Government
                     // but this line is a test to drive it further
-                    options.Configure<OrganizationBase>().Constructor(x => new Customer());
+                    //options.Configure<OrganizationBase>().Constructor(x => new Customer());
+
+                    options.Configure<OrganizationBase>().Discriminator(o => o.OrganizationType)
+                        .Value(nameof(Customer), typeof(Customer))
+                        .Value(nameof(Government), typeof(Government));
                 });
         }
 
