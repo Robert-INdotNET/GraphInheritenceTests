@@ -140,14 +140,14 @@ namespace GraphInheritenceTests
             superCustomer.Tags = new List<Tag>();
             // Tag1 removed - will not be sent back by client
             superCustomer.Tags.Add(new Tag() { Id = tag2Id, Name = "Changed Marketing Campaign1" });
-            superCustomer.Tags.Add(new Tag() { Name = "new Tag" });
+            superCustomer.Tags.Add(new Tag() { Id = 0, Name = "new Tag" });
 
             using (var dbContext = new ComplexDbContext())
             {
                 //dbContext.Update(superCustomer); // doesn't support change tracking with removed items as we know
 
                 // Leonardo Porro suggests to use an anonymous type 
-                dbContext.Map<OrganizationBase>(new
+                var mapped = dbContext.Map<OrganizationBase>(new
                 {
                     superCustomer.Id,
                     superCustomer.OrganizationType,
@@ -183,8 +183,8 @@ namespace GraphInheritenceTests
                 // if you use Map<Customer>(superCustomer):
                 // Detached.Mappers.Exceptions.MapperException : Customer is not a valid value for discriminator in entity GraphInheritenceTests.ComplexModels.Customer.
 
-                // so use base type - OrganizationBase (whether it's not logical correct)
-                var mapped = dbContext.Map<OrganizationBase>(superCustomer);
+                // base type OrganizationBase (whether it's not logical correct) works partly, but ignores the Customer specific properties.
+                var mapped = dbContext.Map<Customer>(superCustomer);
 
                 dbContext.SaveChanges();
             }
@@ -274,7 +274,7 @@ namespace GraphInheritenceTests
                     parent.ParentId,
                     parent.Parent,
                     parent.Children
-                });  
+                });
                 var mapped2 = dbContext.Map<OrganizationBase>(new
                 {
                     child.Id,
