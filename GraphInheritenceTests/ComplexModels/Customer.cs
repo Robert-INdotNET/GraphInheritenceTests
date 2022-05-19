@@ -17,5 +17,8 @@ namespace GraphInheritenceTests.ComplexModels
         public CustomerKind CustomerKind { get; set; }
 
         public string CustomerName { get; set; }
+
+        [Composition]
+        public List<Recommendation> Recommendations { get; set; }
     }
 }

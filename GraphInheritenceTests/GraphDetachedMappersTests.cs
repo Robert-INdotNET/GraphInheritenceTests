@@ -1,5 +1,7 @@
 using Detached.Mappers.EntityFramework;
 using GraphInheritenceTests.ComplexModels;
+using GraphInheritenceTests.DeepModel;
+using GraphInheritenceTests.DTOs;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using System;
@@ -76,33 +78,297 @@ namespace GraphInheritenceTests
         }
 
         [Test]
-        public void _1_DoSimpleChangeOnAggregationCustomerKind()
+        public void _01_DoSimpleChangeOnAggregationCustomerKind()
         {
             DoSimpleChangeOnAggregationCustomerKind(_superCustomer);
         }
 
         [Test]
-        public void _2_AChangeOnAggregationCountryShouldBeIgnored()
+        public void _02_AChangeOnAggregationCountryShouldBeIgnored()
         {
             AChangeOnAggregationCountryShouldBeIgnored(_superCustomer);
         }
 
         [Test]
-        public void _3_RemoveChangeAndAddEntriesInTagListComposition()
+        public void _03_RemoveChangeAndAddEntriesInTagListComposition()
         {
             RemoveChangeAndAddEntriesInTagListComposition(_superCustomer, _tag2.Id);
         }
 
         [Test]
-        public void _4_DoChangeOnCompositionOrganizationNotesWithBackReferenceOrganizationId()
+        public void _04_DoChangeOnCompositionOrganizationNotesWithBackReferenceOrganizationId()
         {
             DoChangeOnCompositionOrganizationNotesWithBackReferenceOrganization(_superCustomer);
         }
 
         [Test]
-        public void _5_DoChangeOnParentChildrenTreeOrHierarchy()
+        public void _05_DoChangeOnParentChildrenTreeOrHierarchy()
         {
             DoChangeOnParentChildrenTreeOrHierarchy(); //doesn't work - parent gets lost (removed)
+        }
+
+        [Test]
+        public void _06_MapOnBaseTypeLoosesConcreteTypeProperties()
+        {
+            var customer1 = new
+            {
+                OrganizationType = "Customer",
+                Name = "Customer1",
+                CustomerKindId = CustomerKindId.Company,
+                CustomerName = "Customer1",
+                PrimaryAddressId = _superCustomer.PrimaryAddressId
+            };
+            var government1 = new
+            {
+                OrganizationType = "Government",
+                Name = "Government1",
+                GovernmentIdentifierCode = "ABC",
+                PrimaryAddressId = _superCustomer.PrimaryAddressId
+            };
+
+            using (var dbContext = new ComplexDbContext())
+            {
+                dbContext.Map<OrganizationBase>(customer1);   // Map<OrganizationBase> does not recognize the OrganizationType discriminator and ignores all Customer properties
+                dbContext.Map<OrganizationBase>(government1); // Map<OrganizationBase> does not recognize the OrganizationType discriminator and ignores all Government properties
+                dbContext.SaveChanges();
+            }
+
+            int customer1Id, government1Id;
+            using (var dbContext = new ComplexDbContext())
+            {
+                Customer customer1Loaded = dbContext.Customers.SingleOrDefault(c => c.Name == "Customer1");
+                customer1Id = customer1Loaded.Id;
+                Assert.That(customer1Loaded, Is.Not.Null);
+                Assert.That(customer1Loaded.CustomerName, Is.EqualTo("Customer1"), "CustomerName gets lost, because of Saving only Base type properties!");
+
+                Government government1Loaded = dbContext.Governments.SingleOrDefault(g => g.Name == "Government1");
+                government1Id = government1Loaded.Id;
+                Assert.That(government1Loaded, Is.Not.Null);
+                Assert.That(government1Loaded.GovernmentIdentifierCode, Is.EqualTo("ABC"));
+            }
+
+            OrganizationNotes note1 = new OrganizationNotes() { OrganizationId = _superCustomer.Id, Date = new DateTime(2000, 05, 10), Text = "Note for Customer1" };
+            OrganizationNotes note2 = new OrganizationNotes() { OrganizationId = _superCustomer.Id, Date = new DateTime(2000, 05, 13), Text = "Note for Government1" };
+            using (var dbContext = new ComplexDbContext())
+            {
+                note1 = dbContext.Map<OrganizationNotes>(note1);
+                note2 = dbContext.Map<OrganizationNotes>(note2);
+                dbContext.SaveChanges();
+            }
+            OrganizationNotes note1Loaded, note2Loaded;
+            using (var dbContext = new ComplexDbContext())
+            {
+                note1Loaded = dbContext.OrganizationNotes.Find(note1.Id);
+                Assert.That(note1Loaded, Is.Not.Null);
+
+                note2Loaded = dbContext.OrganizationNotes.Find(note2.Id);
+                Assert.That(note2Loaded, Is.Not.Null);
+            }
+
+            note1Loaded.OrganizationId = customer1Id;
+            note2Loaded.OrganizationId = government1Id;
+            using (var dbContext = new ComplexDbContext())
+            {
+                dbContext.Map<OrganizationNotes>(note1Loaded);
+                dbContext.Map<OrganizationNotes>(note2Loaded);
+                dbContext.SaveChanges();
+            }
+        }
+
+        [Test]
+        public void _07_AttachedExistingEntityInCompositionDoesInsertButShouldDoUpdate()
+        {
+            TodoItem todoItem1 = new TodoItem()
+            {
+                Title = "TodoItem1",
+                SubTodoItems = new List<SubTodoItem>()
+                {
+                    new SubTodoItem()
+                    {
+                        Title = "SubTodoItem1",
+                        UploadedFiles = null
+                    }
+                }
+            };
+
+            // file will be uploaded seperately and will be inserted
+            var newFile1 = new UploadedFile() { FileTitle = "File1" };
+
+
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                var mapped1 = dbContext.Map<TodoItem>(todoItem1);
+                var mapped2 = dbContext.Map<UploadedFile>(newFile1);
+                dbContext.SaveChanges();
+            }
+
+
+            // --------------- edit -----------------------
+
+            var updated = new
+            {
+                Id = 1,
+                Title = "TodoItem1",
+                SubTodoItems = new[]
+                {
+                    new
+                    {
+                        Id = 1,
+                        Title = "SubTodoItem1",
+                        UploadedFiles = new[]
+                        {
+                            new
+                            {
+                                // existing file will be added (and modified with additional properties)
+                                Id = 1,
+                                FileTitle = "File1 changed",
+                                IsShared = true
+                            }
+                        }
+                    }
+                }
+            };
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                var mapped = dbContext.Map<TodoItem>(updated);
+                dbContext.SaveChanges();
+            }
+
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                var todoItemLoaded = dbContext.TodoItems
+                    .Include(t => t.SubTodoItems)
+                    .ThenInclude(s => s.UploadedFiles)
+                    .First();
+
+                Assert.That(todoItemLoaded.SubTodoItems[0].UploadedFiles, Has.Count.EqualTo(1));
+                Assert.That(todoItemLoaded.SubTodoItems[0].UploadedFiles[0].FileTitle, Is.EqualTo("File1 changed"));
+                Assert.That(todoItemLoaded.SubTodoItems[0].UploadedFiles[0].IsShared, Is.True);
+            }
+        }
+
+        [Test]
+        public void _08_OptionalOneToOneTriesToLoadNullId()
+        {
+            var austria = new Country() { IsoCode = "AT", Name = "Austria", FlagPicture = new Picture() { FileName = "rotWeissRot.png" } };
+            var argentina = new Country() { IsoCode = "AR", Name = "Argentina", FlagPicture = null };
+
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                dbContext.Countries.Add(austria);
+                dbContext.Countries.Add(argentina);
+                dbContext.SaveChanges();
+            }
+
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                IQueryable<CountryDTO> projection = dbContext.Project<Country, CountryDTO>(dbContext.Countries);
+
+                CountryDTO austriaLoaded = projection.Single(c => c.IsoCode == "AT");
+                Assert.That(austriaLoaded.Name, Is.EqualTo("Austria"));
+                Assert.That(austriaLoaded.FlagPictureId, Is.GreaterThan(0));
+                Assert.That(austriaLoaded.FlagPicture, Is.Not.Null);
+                Assert.That(austriaLoaded.FlagPicture.FileName, Is.EqualTo("rotWeissRot.png"));
+
+                CountryDTO argentinaLoaded = projection.Single(c => c.IsoCode == "AR"); //System.InvalidOperationException : Nullable object must have a value.
+                // The origin is the empty FlagPicture - which is OK - but it tries to load a null FlagPictureId
+                Assert.That(argentinaLoaded.Name, Is.EqualTo("Argentina"));
+                Assert.That(argentinaLoaded.FlagPictureId, Is.Null);
+                Assert.That(argentinaLoaded.FlagPicture, Is.Null);
+            }
+        }
+
+        [Test]
+        public void _09_MappedElementsWillBeDuplicated()
+        {
+            Customer customerOne = new Customer() { CustomerName = "1", PrimaryAddressId = 1 };
+            Customer customerTwo = new Customer() { CustomerName = "2", PrimaryAddressId = 1 };
+
+            int customerOneId, customerTwoId;
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                dbContext.Customers.Add(customerOne);
+                dbContext.Customers.Add(customerTwo);
+                dbContext.SaveChanges();
+                customerOneId = customerOne.Id;
+                customerTwoId = customerTwo.Id;
+            }
+
+            var twoChangedCustomer = new
+            {
+                Id = customerTwoId,
+                CustomerName = "2",
+                //PrimaryAddressId = 1, // can be left out with DTO - will not be changed
+                Recommendations = new[]
+                {
+                    new
+                    {
+                        RecommendedById = customerTwoId,
+                        RecommendedToId = customerOneId,
+                        RecommendationDate = new DateTime(2022, 05, 19)
+                    }
+                }
+            };
+
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                var mapped = dbContext.Map<Customer>(twoChangedCustomer);
+
+                Assert.That(mapped.Recommendations, Has.Count.EqualTo(1), "Entity reference has been duplicated, but shouldn't!");
+
+                dbContext.SaveChanges();
+            }
+        }
+
+        [Test]
+        public void _10_TwoPropiertiesToSameEntityOverwriteSecondWithFirstValue()
+        {
+            Customer newCustomer = new Customer() { CustomerName = "no customer now", PrimaryAddressId = 1 };
+            Customer fanCustomer = new Customer() { CustomerName = "fan", PrimaryAddressId = 1 };
+
+            int newCustomerId, fanCustomerId;
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                dbContext.Customers.Add(newCustomer);
+                dbContext.Customers.Add(fanCustomer);
+                dbContext.SaveChanges();
+                newCustomerId = newCustomer.Id;
+                fanCustomerId = fanCustomer.Id;
+            }
+
+            var fanChangedCustomer = new
+            {
+                Id = fanCustomerId,
+                CustomerName = "fan",
+                //PrimaryAddressId = 1, // can be left out with DTO - will not be changed
+                Recommendations = new[]
+                {
+                    new
+                    {
+                        RecommendedById = fanCustomerId,
+                        RecommendedToId = newCustomerId,
+                        RecommendationDate = new DateTime(2022, 05, 19)
+                    }
+                }
+            };
+
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                var mapped = dbContext.Map<Customer>(fanChangedCustomer);
+                dbContext.SaveChanges();
+            }
+
+            using (ComplexDbContext dbContext = new ComplexDbContext())
+            {
+                Customer fanLoaded = dbContext.Customers
+                    .Include(c => c.Recommendations)
+                    .Single(c => c.CustomerName == "fan");
+
+                Assert.That(fanLoaded.Recommendations[0].RecommendedById, Is.EqualTo(fanCustomerId));
+
+                Assert.That(fanLoaded.Recommendations[0].RecommendedToId, Is.EqualTo(newCustomerId), "The Id is the same as itself or RecommendedById. The changed value got lost.");
+                Assert.That(fanLoaded.Recommendations[0].RecommendedToId, Is.Not.EqualTo(fanLoaded.Recommendations[0].RecommendedById));
+            }
         }
 
         private static void SeedCustomerKindsEnum()

@@ -1,6 +1,8 @@
 ﻿using Detached.Mappers.EntityFramework;
 using GraphInheritenceTests.ComplexModels;
+using GraphInheritenceTests.DeepModel;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,6 +20,11 @@ namespace GraphInheritenceTests
         public DbSet<Country> Countries { get; set; }
         public DbSet<OrganizationNotes> OrganizationNotes { get; set; }
         public DbSet<CustomerKind> CustomerKinds { get; set; }
+        public DbSet<Recommendation> Recommendations { get; set; }
+
+        public DbSet<TodoItem> TodoItems { get; set; }
+        public DbSet<SubTodoItem> SubTodoItems { get; set; }
+        public DbSet<UploadedFile> UploadedFiles { get; set; }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
@@ -36,6 +43,10 @@ namespace GraphInheritenceTests
                         .Value(nameof(Customer), typeof(Customer))
                         .Value(nameof(Government), typeof(Government));
                 });
+
+            optionsBuilder.ConfigureWarnings(
+                w => w.Ignore(CoreEventId.NavigationBaseIncludeIgnored)
+            );
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -65,7 +76,6 @@ namespace GraphInheritenceTests
             // .WithOne(n => n.Organization)
             // .HasForeignKey(k => k.OrganizationId);
 
-            // Tree / Hierarchy doesn't work with Map :-(
             modelBuilder.Entity<OrganizationBase>(entity =>
             {
                 entity.HasOne(s => s.Parent);
@@ -73,6 +83,10 @@ namespace GraphInheritenceTests
                 .WithOne()
                 .HasForeignKey(s => s.ParentId);
             });
+
+            modelBuilder.Entity<Customer>()
+                .HasMany<Recommendation>(c => c.Recommendations)
+                .WithOne(r => r.RecommendedBy);
         }
 
         public override int SaveChanges()
@@ -92,10 +106,10 @@ namespace GraphInheritenceTests
                         case EntityState.Modified:
                             //Entry(entity).Property(x => x.CreatedAt).IsModified = false;
                             //entity.ModifiedAt = now;
-                            if (entity is OrganizationNotes entity2)
-                            {
-                                Entry(entity2).State = EntityState.Added;
-                            }
+                            //if (entity is OrganizationNotes entity2)
+                            //{
+                            //    Entry(entity2).State = EntityState.Added;
+                            //}
                             break;
                     }
                 }
